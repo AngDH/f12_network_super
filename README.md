@@ -1,23 +1,25 @@
-# Network Super
+﻿# Network Super
+
+[中文](./README.zh-CN.md)
 
 `Network Super` is a Fiddler-like browser network inspector built with Chrome DevTools Protocol (CDP).
-It captures requests/responses from Chrome tabs, persists them locally as files, supports full-text search (URL/headers/body), and provides request/response interception hooks (`OnBeforeRequest` / `OnBeforeResponse`) for traffic rewriting.
+It captures requests and responses from Chrome tabs, persists them locally as files, supports full-text search across URL/headers/body, and provides interception hooks (`OnBeforeRequest` / `OnBeforeResponse`) for traffic rewriting.
 
 ## Features
 
 - Persistent capture: store metadata in `meta.json` and bodies as files on disk
-- Multi-tab listening: auto attach to browser tabs (with optional `devtools://` filtering)
+- Multi-tab listening: auto attach to browser tabs, with optional `devtools://` filtering
 - Search everywhere: URL, request headers, response headers, request body, response body
-- Rich viewer: headers/preview/response/meta panels, cookie visibility in headers, response file folder shortcut
+- Rich viewer: headers/preview/response/meta panels, file-folder shortcut, row marking
 - Traffic interception: mutate request and response through `interceptor-rules.js`
-- Request marking: right-click color marks for important rows (local persistence)
+- File-based storage: easy to inspect, copy, archive, and diff
 
-## 1) Prerequisites
+## Prerequisites
 
 - Node.js 18+
-- Chrome (or Chromium)
+- Chrome or Chromium
 
-## 2) Start Chrome with CDP
+## Start Chrome With CDP
 
 Use a dedicated browser profile for safety:
 
@@ -27,7 +29,7 @@ Use a dedicated browser profile for safety:
   --user-data-dir="D:\tmp\chrome-cdp-profile"
 ```
 
-## 3) Install and run
+## Install And Run
 
 ```powershell
 npm install
@@ -38,34 +40,34 @@ Open UI:
 
 - `http://127.0.0.1:3100`
 
-## 4) What gets stored
+## Storage Layout
 
 - Records: `data/records/{id}/meta.json`
 - Body files: `data/records/{id}/request.<ext>` and `data/records/{id}/response.<ext>`
 
-## 5) Environment variables (optional)
+## Environment Variables
 
 - `PORT` default `3100`
 - `CDP_HOST` default `127.0.0.1`
 - `CDP_PORT` default `9222`
-- `CDP_TARGET` default empty (CDP auto target)
+- `CDP_TARGET` default empty (auto target attach)
 - `CAPTURE_DEVTOOLS` default `0` (set `1` to include `devtools://` tabs)
 - `DATA_DIR` default `./data`
 
-## Notes
+## Interception Hooks
 
-- CDP may not return body for some requests (cache/service worker/special streams).
-- Current version focuses on HTTP request/response capture and persistence.
+Edit `interceptor-rules.js` to modify traffic:
 
-## Interception Hooks (Fiddler-like)
+- `onBeforeRequest(ctx)`: mutate request URL, method, headers, or body before sending
+- `onBeforeResponse(ctx)`: mutate response status, headers, or body before returning to browser
 
-You can edit `interceptor-rules.js` to modify traffic:
-
-- `onBeforeRequest(ctx)`: mutate request URL/method/headers/body before sending.
-- `onBeforeResponse(ctx)`: mutate response status/headers/body before returning to browser.
-
-After editing, restart server:
+After editing rules, restart the server:
 
 ```powershell
 npm start
 ```
+
+## Notes
+
+- Some special requests may still have body capture limitations depending on browser behavior.
+- Existing records are file-based and are not backfilled when capture logic changes.
