@@ -1,0 +1,433 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Network Super</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --panel: #ffffff;
+        --panel-2: #f8f9fb;
+        --head: #f3f5f7;
+        --line: #d9dee5;
+        --text: #1f2328;
+        --muted: #5f6b7a;
+        --accent: #1a73e8;
+        --ok: #0b8043;
+        --warn: #b06000;
+        --bad: #c5221f;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        overflow: hidden;
+      }
+      .app {
+        display: grid;
+        grid-template-rows: auto auto auto 1fr 8px var(--detail-height, 290px);
+        height: 100vh;
+      }
+      .topbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        background: linear-gradient(to bottom, #f9fafb, #f1f3f4);
+        border-bottom: 1px solid var(--line);
+      }
+      .title {
+        font-size: 13px;
+        color: #202124;
+        margin: 0;
+        padding-right: 12px;
+      }
+      .btn {
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--text);
+        padding: 5px 8px;
+        font-size: 12px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .btn:hover {
+        border-color: #c2c9d3;
+        background: #f6f8fa;
+      }
+      .btn.danger {
+        border-color: #e0b4b2;
+        color: #a50e0e;
+        background: #fff5f5;
+      }
+      .btn.danger:hover {
+        border-color: #d48682;
+        background: #ffe9e9;
+      }
+      .search {
+        flex: 1;
+        min-width: 220px;
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--text);
+        border-radius: 4px;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      .meta {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .filters {
+        display: flex;
+        gap: 6px;
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        overflow-x: auto;
+      }
+      .pill {
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--muted);
+        padding: 4px 8px;
+        border-radius: 14px;
+        font-size: 11px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .pill.active {
+        border-color: var(--accent);
+        color: #174ea6;
+        background: #e8f0fe;
+      }
+      .targets {
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--line);
+        background: #fafbfc;
+        font-size: 11px;
+        color: var(--muted);
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      .targets b {
+        color: #3c4043;
+      }
+      .target-chip {
+        display: inline-block;
+        margin-right: 6px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        border: 1px solid #d8dee7;
+        background: #fff;
+        color: #4d5765;
+      }
+      .table-wrap {
+        overflow: auto;
+        background: var(--panel);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #e7eaef;
+        padding: 6px 8px;
+        text-align: left;
+      }
+      th {
+        background: var(--head);
+        color: #5f6368;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      tr.req-row:hover {
+        background: #f7f9fc;
+        cursor: pointer;
+      }
+      tr.req-row.selected {
+        box-shadow: inset 0 0 0 2px #7aa8ff;
+      }
+      tr.req-row.mark-red {
+        background: #ffe5e5;
+      }
+      tr.req-row.mark-orange {
+        background: #fff0de;
+      }
+      tr.req-row.mark-yellow {
+        background: #fff8cf;
+      }
+      tr.req-row.mark-green {
+        background: #e7f7ea;
+      }
+      tr.req-row.mark-blue {
+        background: #e7f0ff;
+      }
+      tr.req-row.mark-purple {
+        background: #f1e9ff;
+      }
+      tr.req-row.auto-intercepted {
+        background: #e9f6ff;
+      }
+      .row-menu {
+        position: fixed;
+        z-index: 9999;
+        display: none;
+        min-width: 160px;
+        background: #fff;
+        border: 1px solid #d3dbe6;
+        border-radius: 6px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+        padding: 6px;
+      }
+      .row-menu-item {
+        width: 100%;
+        text-align: left;
+        border: 1px solid transparent;
+        background: #fff;
+        color: #1f2328;
+        border-radius: 4px;
+        padding: 6px 8px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .row-menu-item:hover {
+        background: #f3f6fb;
+      }
+      .submenu-wrap {
+        position: relative;
+      }
+      .submenu {
+        position: absolute;
+        left: calc(100% - 2px);
+        top: -6px;
+        display: none;
+        min-width: 170px;
+        background: #fff;
+        border: 1px solid #d3dbe6;
+        border-radius: 6px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+        padding: 6px;
+      }
+      .submenu-wrap.open .submenu {
+        display: block;
+      }
+      .submenu-arrow {
+        float: right;
+        color: #7c8798;
+      }
+      .dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      .dot-red { background: #f16b6b; }
+      .dot-orange { background: #f3a33f; }
+      .dot-yellow { background: #e5c73c; }
+      .dot-green { background: #55b56a; }
+      .dot-blue { background: #5d8ff5; }
+      .dot-purple { background: #9b71e8; }
+      .dot-clear { background: #9aa4b1; }
+      body.row-menu-open {
+        user-select: none;
+      }
+      .status-ok {
+        color: var(--ok);
+      }
+      .status-warn {
+        color: var(--warn);
+      }
+      .status-bad {
+        color: var(--bad);
+      }
+      .name-cell {
+        max-width: 520px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .detail {
+        border-top: 1px solid var(--line);
+        background: var(--panel-2);
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 0;
+      }
+      .splitter {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: #eef2f7;
+        cursor: row-resize;
+      }
+      .splitter:hover {
+        background: #e5ecf6;
+      }
+      body.resizing {
+        user-select: none;
+        cursor: row-resize;
+      }
+      .tabs {
+        display: flex;
+        gap: 2px;
+        border-bottom: 1px solid var(--line);
+        padding: 4px 6px;
+        background: #f3f5f7;
+      }
+      .tab {
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        padding: 6px 8px;
+        font-size: 12px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .tab.active {
+        color: var(--text);
+        border-color: #cbd2dc;
+        background: #ffffff;
+      }
+      .tab-body {
+        padding: 10px;
+        overflow: auto;
+        min-height: 0;
+      }
+      .kvline {
+        margin-bottom: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .kvline b {
+        color: var(--text);
+      }
+      pre {
+        margin: 0;
+        border: 1px solid var(--line);
+        background: #ffffff;
+        border-radius: 4px;
+        color: #202124;
+        padding: 8px;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .links a {
+        color: #1a73e8;
+        text-decoration: none;
+        margin-right: 12px;
+      }
+      .action-links {
+        margin-bottom: 10px;
+      }
+      .action-btn {
+        display: inline-block;
+        border: 1px solid #c9d3e2;
+        background: #ffffff;
+        color: #1a73e8;
+        text-decoration: none;
+        border-radius: 4px;
+        padding: 4px 8px;
+        margin-right: 8px;
+      }
+      .action-btn:hover {
+        background: #f5f8ff;
+        border-color: #b5c3d9;
+      }
+      @media (max-width: 980px) {
+        .app {
+          grid-template-rows: auto auto auto 1fr 8px var(--detail-height, 45%);
+        }
+        .split {
+          grid-template-columns: 1fr;
+        }
+        .name-cell {
+          max-width: 260px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar">
+        <h1 class="title">Network</h1>
+        <button class="btn" id="refreshBtn">Refresh</button>
+        <button class="btn" id="autoBtn">Auto: ON</button>
+        <button class="btn danger" id="clearBtn">Clear All</button>
+        <input id="q" class="search" placeholder="Search URL / headers / request body / response body" />
+        <span id="meta" class="meta"></span>
+      </div>
+      <div class="filters" id="filters">
+        <button class="pill active" data-filter="all">All</button>
+        <button class="pill" data-filter="document">Doc</button>
+        <button class="pill" data-filter="xhr">XHR/Fetch</button>
+        <button class="pill" data-filter="js">JS</button>
+        <button class="pill" data-filter="css">CSS</button>
+        <button class="pill" data-filter="img">Img</button>
+        <button class="pill" data-filter="font">Font</button>
+        <button class="pill" data-filter="other">Other</button>
+      </div>
+      <div class="targets" id="targetsBar"><b>Listening Tabs:</b> loading...</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 42%">Name</th>
+              <th style="width: 8%">Method</th>
+              <th style="width: 8%">Status</th>
+              <th style="width: 12%">Type</th>
+              <th style="width: 10%">Size</th>
+              <th style="width: 20%">Time</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="splitter" id="splitter" title="Drag to resize list/detail"></div>
+      <div class="detail">
+        <div class="tabs">
+          <button class="tab active" data-tab="headers">Headers</button>
+          <button class="tab" data-tab="preview">Preview</button>
+          <button class="tab" data-tab="response">Response</button>
+          <button class="tab" data-tab="meta">Meta</button>
+        </div>
+        <div class="tab-body" id="detail">Select one request from upper list.</div>
+      </div>
+    </div>
+    <div class="row-menu" id="rowMenu">
+      <div class="submenu-wrap" id="markSubmenuWrap">
+        <button class="row-menu-item" id="markMenuTrigger">Mark <span class="submenu-arrow">▶</span></button>
+        <div class="submenu">
+          <button class="row-menu-item" data-mark="red"><span class="dot dot-red"></span>Red</button>
+          <button class="row-menu-item" data-mark="orange"><span class="dot dot-orange"></span>Orange</button>
+          <button class="row-menu-item" data-mark="yellow"><span class="dot dot-yellow"></span>Yellow</button>
+          <button class="row-menu-item" data-mark="green"><span class="dot dot-green"></span>Green</button>
+          <button class="row-menu-item" data-mark="blue"><span class="dot dot-blue"></span>Blue</button>
+          <button class="row-menu-item" data-mark="purple"><span class="dot dot-purple"></span>Purple</button>
+          <button class="row-menu-item" data-mark="clear"><span class="dot dot-clear"></span>Clear Mark</button>
+        </div>
+      </div>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
