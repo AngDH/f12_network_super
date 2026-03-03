@@ -1,6 +1,7 @@
 ﻿const rowsEl = document.getElementById("rows");
 const qEl = document.getElementById("q");
 const refreshBtn = document.getElementById("refreshBtn");
+const searchBtn = document.getElementById("searchBtn");
 const autoBtn = document.getElementById("autoBtn");
 const clearBtn = document.getElementById("clearBtn");
 const detailEl = document.getElementById("detail");
@@ -10,6 +11,11 @@ const targetsBarEl = document.getElementById("targetsBar");
 const splitterEl = document.getElementById("splitter");
 const rowMenuEl = document.getElementById("rowMenu");
 const markSubmenuWrapEl = document.getElementById("markSubmenuWrap");
+const searchModalEl = document.getElementById("searchModal");
+const searchRowsEl = document.getElementById("searchRows");
+const searchDetailEl = document.getElementById("searchDetail");
+const searchMetaEl = document.getElementById("searchMeta");
+const searchCloseBtn = document.getElementById("searchCloseBtn");
 
 let state = {
   q: "",
@@ -23,6 +29,14 @@ let state = {
   targetsHiddenUntil: 0,
   rowMarks: {},
   contextRowId: "",
+};
+
+let searchState = {
+  q: "",
+  items: [],
+  selectedId: "",
+  detail: null,
+  activeTab: "headers",
 };
 
 const DETAIL_HEIGHT_KEY = "network_super_detail_height";
@@ -51,6 +65,27 @@ function esc(str) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function escapeRegExp(str) {
+  return String(str ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightEscaped(str, q) {
+  const raw = String(str ?? "");
+  const keyword = String(q ?? "").trim();
+  if (!keyword) return esc(raw);
+  const re = new RegExp(escapeRegExp(keyword), "ig");
+  let out = "";
+  let lastIndex = 0;
+  for (const match of raw.matchAll(re)) {
+    const idx = match.index ?? 0;
+    out += esc(raw.slice(lastIndex, idx));
+    out += `<mark class="hl">${esc(match[0])}</mark>`;
+    lastIndex = idx + match[0].length;
+  }
+  out += esc(raw.slice(lastIndex));
+  return out;
 }
 
 function fmtTime(s) {
@@ -185,6 +220,47 @@ function renderList() {
   }
 }
 
+function renderSearchList() {
+  if (!searchRowsEl) return;
+  if (searchState.items.length === 0) {
+    searchRowsEl.innerHTML = `
+      <tr>
+        <td colspan="6" class="search-empty">No results.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  searchRowsEl.innerHTML = searchState.items
+    .map((x) => {
+      const cls = statusClass(x.response_status);
+      const status = x.response_status ?? (x.failed ? "ERR" : "-");
+      const selected = searchState.selectedId === x.id ? "selected" : "";
+      const mark = String(state.rowMarks[x.id] || "");
+      const markClass = mark ? `mark-${mark}` : "";
+      const autoIntercepted =
+        !mark && (x.request_intercepted === true || x.response_intercepted === true)
+          ? "auto-intercepted"
+          : "";
+      const displayName = pickNameForRow(x);
+      return `
+        <tr class="req-row ${selected} ${markClass} ${autoIntercepted}" data-search-id="${esc(x.id)}">
+          <td class="name-cell" title="${esc(x.request_url)}">${highlightEscaped(displayName, searchState.q)}</td>
+          <td>${highlightEscaped(x.request_method || "", searchState.q)}</td>
+          <td class="${cls}">${esc(status)}</td>
+          <td>${highlightEscaped(x.response_mime_type || x.resource_type || "", searchState.q)}</td>
+          <td>${esc(fmtSize(x.response_body_size))}</td>
+          <td>${esc(fmtTime(x.sort_time || x.created_at))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  for (const tr of searchRowsEl.querySelectorAll("tr[data-search-id]")) {
+    tr.addEventListener("click", () => selectSearchRequest(tr.dataset.searchId));
+  }
+}
+
 function hideRowMenu() {
   if (!rowMenuEl) return;
   rowMenuEl.style.display = "none";
@@ -316,7 +392,7 @@ async function openBodyFolder(id, kind = "response") {
   }
 }
 
-function renderHeaders(detail) {
+function renderHeaders(detail, highlightQ = "") {
   const reqHeaders = detail.request_headers || {};
   const resHeaders = detail.response_headers || {};
 
@@ -335,19 +411,19 @@ function renderHeaders(detail) {
   }
 
   return `
-    <div class="kvline"><b>Request URL:</b> ${esc(detail.request_url)}</div>
-    <div class="kvline"><b>Request Method:</b> ${esc(detail.request_method)}</div>
+    <div class="kvline"><b>Request URL:</b> ${highlightEscaped(detail.request_url, highlightQ)}</div>
+    <div class="kvline"><b>Request Method:</b> ${highlightEscaped(detail.request_method, highlightQ)}</div>
     <div class="kvline"><b>Status Code:</b> ${esc(detail.response_status ?? "-")} ${esc(detail.response_status_text || "")}</div>
     <div class="kvline"><b>Remote Address:</b> ${esc(detail.response_remote_ip || "-")}:${esc(detail.response_remote_port || "-")}</div>
-    <div class="kvline"><b>Type:</b> ${esc(detail.response_mime_type || "-")}</div>
+    <div class="kvline"><b>Type:</b> ${highlightEscaped(detail.response_mime_type || "-", highlightQ)}</div>
     <div class="kvline"><b>Request Headers</b></div>
-    <pre>${esc(formatHeadersForDisplay(reqHeaders))}</pre>
+    <pre>${highlightEscaped(formatHeadersForDisplay(reqHeaders), highlightQ)}</pre>
     <div class="kvline" style="margin-top:8px;"><b>Response Headers</b></div>
-    <pre>${esc(formatHeadersForDisplay(resHeaders))}</pre>
+    <pre>${highlightEscaped(formatHeadersForDisplay(resHeaders), highlightQ)}</pre>
   `;
 }
 
-function renderMeta(detail) {
+function renderMeta(detail, highlightQ = "") {
   const data = {
     id: detail.id,
     created_at: detail.created_at,
@@ -362,7 +438,7 @@ function renderMeta(detail) {
     request_body_path: detail.request_body_path,
     response_body_path: detail.response_body_path,
   };
-  return `<pre>${esc(JSON.stringify(data, null, 2))}</pre>`;
+  return `<pre>${highlightEscaped(JSON.stringify(data, null, 2), highlightQ)}</pre>`;
 }
 
 function isTextLikeMime(mime) {
@@ -468,12 +544,149 @@ async function renderDetail() {
   }
 }
 
+async function renderSearchDetail() {
+  if (!searchDetailEl) return;
+  if (!searchState.detail) {
+    searchDetailEl.innerHTML = '<span class="muted">Select one request from upper list.</span>';
+    return;
+  }
+
+  const d = searchState.detail;
+  const mime = String(d.response_mime_type || "").toLowerCase();
+
+  if (searchState.activeTab === "headers") {
+    searchDetailEl.innerHTML = renderHeaders(d, searchState.q);
+    return;
+  }
+
+  if (searchState.activeTab === "meta") {
+    searchDetailEl.innerHTML = renderMeta(d, searchState.q);
+    return;
+  }
+
+  if (searchState.activeTab === "preview") {
+    const txt = await fetchResponseText(d.id, mime);
+    if (txt == null) {
+      searchDetailEl.innerHTML = `
+        <div class="kvline muted">Binary or non-text response.</div>
+      `;
+      return;
+    }
+
+    if (mime.includes("json")) {
+      try {
+        const j = JSON.parse(txt);
+        searchDetailEl.innerHTML = `<pre>${highlightEscaped(JSON.stringify(j, null, 2), searchState.q)}</pre>`;
+        return;
+      } catch {
+      }
+    }
+
+    searchDetailEl.innerHTML = `<pre>${highlightEscaped(txt.slice(0, 600000), searchState.q)}</pre>`;
+    return;
+  }
+
+  if (searchState.activeTab === "response") {
+    const topLinks = `
+      <div class="links action-links">
+        <a class="action-btn" href="#" data-open-folder="response" data-id="${esc(d.id)}">Open Response Folder</a>
+      </div>
+    `;
+
+    if (isImageMime(mime)) {
+      searchDetailEl.innerHTML = `
+        ${topLinks}
+        <div class="kvline muted">Response MIME: ${esc(d.response_mime_type || "unknown")} | Size: ${esc(fmtSize(d.response_body_size))}</div>
+        <div style="padding-top:8px;">
+          <img src="/api/requests/${encodeURIComponent(d.id)}/body/response" alt="response-preview" style="max-width:100%; max-height:260px; border:1px solid #d9dee5;" />
+        </div>
+      `;
+      return;
+    }
+
+    if (isTextLikeMime(mime)) {
+      const txt = await fetchResponseText(d.id, mime);
+      if (txt != null) {
+        if (mime.includes("json")) {
+          try {
+            const j = JSON.parse(txt);
+            searchDetailEl.innerHTML = `${topLinks}<pre>${highlightEscaped(JSON.stringify(j, null, 2), searchState.q)}</pre>`;
+            return;
+          } catch {
+          }
+        }
+        searchDetailEl.innerHTML = `${topLinks}<pre>${highlightEscaped(txt, searchState.q)}</pre>`;
+        return;
+      }
+    }
+
+    searchDetailEl.innerHTML = `
+      ${topLinks}
+      <div class="kvline muted">Response MIME: ${esc(d.response_mime_type || "unknown")}</div>
+      <div class="kvline muted">Response size: ${esc(fmtSize(d.response_body_size))}</div>
+      <div class="kvline muted">Binary response is not rendered inline.</div>
+    `;
+  }
+}
+
 async function selectRequest(id) {
   state.selectedId = id;
   const d = await fetchDetail(id);
   state.detail = d;
   renderList();
   await renderDetail();
+}
+
+async function selectSearchRequest(id) {
+  searchState.selectedId = id;
+  searchState.detail = await fetchDetail(id);
+  renderSearchList();
+  await renderSearchDetail();
+}
+
+function openSearchModal() {
+  if (!searchModalEl) return;
+  searchModalEl.classList.add("open");
+}
+
+function closeSearchModal() {
+  if (!searchModalEl) return;
+  searchModalEl.classList.remove("open");
+}
+
+async function performSearch() {
+  const q = qEl.value.trim();
+  if (!q) {
+    alert("Enter a search keyword first.");
+    return;
+  }
+
+  openSearchModal();
+  searchMetaEl.textContent = `Searching: ${q}`;
+  searchState.q = q;
+  searchState.items = [];
+  searchState.selectedId = "";
+  searchState.detail = null;
+  searchState.activeTab = "headers";
+  for (const t of document.querySelectorAll(".search-tab")) {
+    t.classList.toggle("active", t.dataset.searchTab === "headers");
+  }
+  searchRowsEl.innerHTML = `
+    <tr>
+      <td colspan="6" class="search-empty">Searching...</td>
+    </tr>
+  `;
+  searchDetailEl.innerHTML = '<span class="muted">Select one request from upper list.</span>';
+
+  const url = new URL("/api/requests", location.origin);
+  url.searchParams.set("limit", "2000");
+  url.searchParams.set("q", q);
+
+  const res = await fetch(url);
+  const data = await res.json();
+  searchState.items = data.items || [];
+  searchMetaEl.textContent = `Query: ${q} | Results: ${searchState.items.length}`;
+  renderSearchList();
 }
 
 for (const tab of document.querySelectorAll(".tab")) {
@@ -483,6 +696,16 @@ for (const tab of document.querySelectorAll(".tab")) {
       t.classList.toggle("active", t === tab);
     }
     await renderDetail();
+  });
+}
+
+for (const tab of document.querySelectorAll(".search-tab")) {
+  tab.addEventListener("click", async () => {
+    searchState.activeTab = tab.dataset.searchTab;
+    for (const t of document.querySelectorAll(".search-tab")) {
+      t.classList.toggle("active", t === tab);
+    }
+    await renderSearchDetail();
   });
 }
 
@@ -497,16 +720,13 @@ filtersEl.addEventListener("click", (e) => {
 });
 
 refreshBtn.addEventListener("click", async () => {
-  state.q = qEl.value.trim();
   state.latestSortMs = 0;
   await loadListFull();
 });
 
-async function applySearchFromInput() {
-  state.q = qEl.value.trim();
-  state.latestSortMs = 0;
-  await loadListFull();
-}
+searchBtn.addEventListener("click", async () => {
+  await performSearch();
+});
 
 autoBtn.addEventListener("click", () => {
   state.auto = !state.auto;
@@ -540,17 +760,6 @@ clearBtn.addEventListener("click", async () => {
   }
 });
 
-qEl.addEventListener("keydown", async (e) => {
-  if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) {
-    e.preventDefault();
-    await applySearchFromInput();
-  }
-});
-
-qEl.addEventListener("change", async () => {
-  await applySearchFromInput();
-});
-
 setInterval(async () => {
   if (!state.auto) return;
   if (state.q) {
@@ -564,6 +773,26 @@ setInterval(loadTargets, 2000);
 
 loadListFull();
 loadTargets();
+
+if (searchCloseBtn) {
+  searchCloseBtn.addEventListener("click", () => {
+    closeSearchModal();
+  });
+}
+
+if (searchModalEl) {
+  searchModalEl.addEventListener("click", (e) => {
+    if (e.target === searchModalEl) {
+      closeSearchModal();
+    }
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && searchModalEl?.classList.contains("open")) {
+    closeSearchModal();
+  }
+});
 
 document.addEventListener("click", async (e) => {
   const target = e.target;
@@ -585,6 +814,17 @@ rowsEl.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   showRowMenu(row.getAttribute("data-id"), e.clientX, e.clientY);
 });
+
+if (searchRowsEl) {
+  searchRowsEl.addEventListener("contextmenu", (e) => {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest("tr[data-search-id]");
+    if (!row) return;
+    e.preventDefault();
+    showRowMenu(row.getAttribute("data-search-id"), e.clientX, e.clientY);
+  });
+}
 
 document.addEventListener("click", (e) => {
   const target = e.target;
@@ -629,6 +869,7 @@ if (rowMenuEl) {
     }
     saveRowMarks();
     renderList();
+    renderSearchList();
     hideRowMenu();
   });
 }

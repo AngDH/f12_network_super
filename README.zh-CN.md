@@ -9,6 +9,7 @@
 
 - 持久化抓包：元数据保存为 `meta.json`，请求体和响应体保存为文件
 - 多标签页监听：自动附加多个 Chrome 页面，可选择排除 `devtools://`
+- 多 target 监听：除页面外，也会附加 `worker/shared_worker/service_worker/webview`
 - 全局搜索：支持 URL、请求头、响应头、请求体、响应体全文检索
 - 可视化查看：支持 Headers / Preview / Response / Meta 面板
 - 请求标记：支持右键颜色标记，并保存在浏览器本地

@@ -3,6 +3,15 @@ const path = require("path");
 const CDP = require("chrome-remote-interface");
 const { getInterceptorHooks } = require("./interceptor");
 
+const CAPTURE_TARGET_TYPES = new Set([
+  "page",
+  "iframe",
+  "worker",
+  "shared_worker",
+  "service_worker",
+  "webview",
+]);
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -189,7 +198,7 @@ function decodeDataUrl(url) {
 function buildBaseMeta({ id, params, requestBodyPath, targetInfo }) {
   return {
     id,
-    cdp_target_id: targetInfo.id || null,
+    cdp_target_id: targetInfo.id || targetInfo.targetId || null,
     cdp_target_title: targetInfo.title || null,
     cdp_target_url: targetInfo.url || null,
     cdp_request_id: params.requestId,
@@ -239,6 +248,9 @@ function captureToStore({
   const targetClients = new Map();
   const attachedTargets = new Map();
   const hooks = getInterceptorHooks();
+  let browserClient = null;
+  let reconnectTimer = null;
+  let lastConnectErrorMessage = "";
   let lastMs = 0;
   let seq = 0;
 
@@ -256,12 +268,36 @@ function captureToStore({
     return `${targetId}:${requestId}`;
   }
 
+  function getTargetId(targetInfo) {
+    return targetInfo && (targetInfo.id || targetInfo.targetId) ? targetInfo.id || targetInfo.targetId : null;
+  }
+
+  function normalizeTargetInfo(targetInfo) {
+    if (!targetInfo) return null;
+    return {
+      id: getTargetId(targetInfo),
+      targetId: getTargetId(targetInfo),
+      title: targetInfo.title || "",
+      url: targetInfo.url || "",
+      type: targetInfo.type || "",
+    };
+  }
+
   function emitTargetsUpdate() {
     if (typeof onTargetsUpdate !== "function") return;
     const targets = Array.from(attachedTargets.values())
       .sort((a, b) => (a.title || "").localeCompare(b.title || ""))
       .map((x) => ({ ...x }));
     onTargetsUpdate(targets);
+  }
+
+  function isEligibleTarget(targetInfo) {
+    const t = normalizeTargetInfo(targetInfo);
+    if (!t || !t.id) return false;
+    if (!CAPTURE_TARGET_TYPES.has(String(t.type || ""))) return false;
+    if (cdpTarget) return t.id === cdpTarget;
+    if (includeDevtools) return true;
+    return !String(t.url || "").startsWith("devtools://");
   }
 
   function ensureReqStateForPaused(targetInfo, params) {
@@ -301,21 +337,22 @@ function captureToStore({
   }
 
   async function attachTarget(targetInfo) {
-    if (!targetInfo || !targetInfo.id) return;
-    if (targetClients.has(targetInfo.id)) return;
+    const t = normalizeTargetInfo(targetInfo);
+    if (!t || !t.id) return;
+    if (targetClients.has(t.id)) return;
 
     try {
       const client = await CDP({
         host: cdpHost,
         port: cdpPort,
-        target: targetInfo.id,
+        target: t.id,
       });
-      targetClients.set(targetInfo.id, client);
-      attachedTargets.set(targetInfo.id, {
-        id: targetInfo.id,
-        title: targetInfo.title || "",
-        url: targetInfo.url || "",
-        type: targetInfo.type || "page",
+      targetClients.set(t.id, client);
+      attachedTargets.set(t.id, {
+        id: t.id,
+        title: t.title || "",
+        url: t.url || "",
+        type: t.type || "page",
         attached_at: new Date().toISOString(),
       });
       emitTargetsUpdate();
@@ -347,7 +384,7 @@ function captureToStore({
 
       Network.requestWillBeSent((params) => {
         try {
-          const key = reqKey(targetInfo.id, params.requestId);
+          const key = reqKey(t.id, params.requestId);
           const id = nextRecordId();
           const recordDir = path.join(recordsDir, id);
           ensureDir(recordDir);
@@ -361,7 +398,7 @@ function captureToStore({
             ? writeBodyFile(recordDir, "request", Buffer.from(params.request.postData, "utf8"), requestExt)
             : null;
 
-          const meta = buildBaseMeta({ id, params, requestBodyPath, targetInfo });
+          const meta = buildBaseMeta({ id, params, requestBodyPath, targetInfo: t });
           if (pendingRequestIntercepted.get(key) === true) {
             meta.request_intercepted = true;
             pendingRequestIntercepted.delete(key);
@@ -397,7 +434,7 @@ function captureToStore({
 
       Network.requestWillBeSentExtraInfo((params) => {
         try {
-          const key = reqKey(targetInfo.id, params.requestId);
+          const key = reqKey(t.id, params.requestId);
           const reqState = requestMap.get(key);
           if (!reqState) return;
           const metaPath = path.join(reqState.recordDir, "meta.json");
@@ -411,7 +448,7 @@ function captureToStore({
 
       Network.responseReceived((params) => {
         try {
-          const key = reqKey(targetInfo.id, params.requestId);
+          const key = reqKey(t.id, params.requestId);
           const reqState = requestMap.get(key);
           if (!reqState) return;
 
@@ -437,7 +474,7 @@ function captureToStore({
 
       Network.responseReceivedExtraInfo((params) => {
         try {
-          const key = reqKey(targetInfo.id, params.requestId);
+          const key = reqKey(t.id, params.requestId);
           const reqState = requestMap.get(key);
           if (!reqState) return;
           const metaPath = path.join(reqState.recordDir, "meta.json");
@@ -458,7 +495,7 @@ function captureToStore({
 
       Network.loadingFinished((params) => {
         try {
-          const key = reqKey(targetInfo.id, params.requestId);
+          const key = reqKey(t.id, params.requestId);
           const reqState = requestMap.get(key);
           if (!reqState) return;
           const metaPath = path.join(reqState.recordDir, "meta.json");
@@ -493,7 +530,7 @@ function captureToStore({
       Fetch.requestPaused(async (params) => {
         try {
           const netId = params.networkId || params.requestId;
-          const key = reqKey(targetInfo.id, netId);
+          const key = reqKey(t.id, netId);
 
           if (!params.responseStatusCode) {
             // OnBeforeRequest: allow request mutation before sending.
@@ -507,7 +544,7 @@ function captureToStore({
                   resourceType: params.resourceType || "",
                   frameId: params.frameId || "",
                   requestId: netId,
-                  target: targetInfo,
+                  target: t,
                 });
                 if (decision && typeof decision === "object") {
                   const requestModified =
@@ -550,7 +587,7 @@ function captureToStore({
           }
 
           // OnBeforeResponse: allow response/header/body mutation.
-          const { reqState } = ensureReqStateForPaused(targetInfo, params);
+          const { reqState } = ensureReqStateForPaused(t, params);
           const metaPath = path.join(reqState.recordDir, "meta.json");
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
           const pausedHeaders = headersArrayToObject(params.responseHeaders);
@@ -595,7 +632,7 @@ function captureToStore({
                 resourceType: params.resourceType || "",
                 frameId: params.frameId || "",
                 requestId: netId,
-                target: targetInfo,
+                target: t,
               });
               if (decision && typeof decision === "object") {
                 if (decision.statusCode != null) {
@@ -662,42 +699,115 @@ function captureToStore({
       });
 
       client.on("disconnect", () => {
-        targetClients.delete(targetInfo.id);
-        attachedTargets.delete(targetInfo.id);
+        targetClients.delete(t.id);
+        attachedTargets.delete(t.id);
         emitTargetsUpdate();
       });
 
-      console.log(`CDP attached target: ${targetInfo.id} ${targetInfo.title || ""}`);
+      console.log(`CDP attached target: ${t.id} ${t.title || ""}`);
     } catch (err) {
-      console.error(`Attach target failed (${targetInfo.id}):`, err.message);
+      console.error(`Attach target failed (${t.id}):`, err.message);
     }
   }
 
-  async function scanTargetsAndAttach() {
-    const list = await CDP.List({ host: cdpHost, port: cdpPort });
-    const targets = list.filter((t) => {
-      if (t.type !== "page") return false;
-      if (includeDevtools) return true;
-      return !String(t.url || "").startsWith("devtools://");
-    });
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connectBrowser().catch(() => {
+        // connectBrowser logs and reschedules itself.
+      });
+    }, 1500);
+  }
 
-    if (cdpTarget) {
-      const matched = targets.find((t) => t.id === cdpTarget);
-      if (matched) await attachTarget(matched);
-      return;
+  async function connectBrowser() {
+    try {
+      if (browserClient) return browserClient;
+      const client = await CDP({ host: cdpHost, port: cdpPort });
+      browserClient = client;
+
+      const { Target } = client;
+      await Target.setDiscoverTargets({ discover: true });
+
+      const onTargetInfo = (targetInfo) => {
+        const t = normalizeTargetInfo(targetInfo);
+        if (!t || !t.id) return;
+        if (attachedTargets.has(t.id)) {
+          const prev = attachedTargets.get(t.id);
+          attachedTargets.set(t.id, {
+            ...prev,
+            title: t.title || prev.title || "",
+            url: t.url || prev.url || "",
+            type: t.type || prev.type || "page",
+          });
+          emitTargetsUpdate();
+        }
+        if (isEligibleTarget(t)) {
+          attachTarget(t).catch((err) => {
+            console.error(`Auto-attach failed (${t.id}):`, err.message);
+          });
+        }
+      };
+
+      Target.targetCreated(({ targetInfo }) => {
+        onTargetInfo(targetInfo);
+      });
+
+      Target.targetInfoChanged(({ targetInfo }) => {
+        onTargetInfo(targetInfo);
+      });
+
+      Target.targetDestroyed(({ targetId }) => {
+        attachedTargets.delete(targetId);
+        targetClients.delete(targetId);
+        emitTargetsUpdate();
+      });
+
+      const { targetInfos } = await Target.getTargets();
+      await Promise.all((targetInfos || []).filter(isEligibleTarget).map((t) => attachTarget(t)));
+
+      client.on("disconnect", () => {
+        browserClient = null;
+        const msg = "browser connection disconnected";
+        if (msg !== lastConnectErrorMessage) {
+          console.error(`CDP browser connection lost: ${msg}`);
+          lastConnectErrorMessage = msg;
+        }
+        scheduleReconnect();
+      });
+
+      lastConnectErrorMessage = "";
+      return client;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      if (msg !== lastConnectErrorMessage) {
+        console.error(`CDP browser connect failed: ${msg}`);
+        console.error("Waiting for Chrome CDP to become available...");
+        lastConnectErrorMessage = msg;
+      }
+      scheduleReconnect();
+      return null;
     }
-
-    await Promise.all(targets.map((t) => attachTarget(t)));
   }
 
   const start = async () => {
-    await scanTargetsAndAttach();
-    setInterval(() => {
-      scanTargetsAndAttach().catch((err) => {
-        console.error("CDP target scan failed:", err.message);
-      });
-    }, 1500);
+    await connectBrowser();
     console.log(`CDP multi-target watcher running at ${cdpHost}:${cdpPort}`);
+    return {
+      stop() {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        if (browserClient) {
+          try {
+            browserClient.close();
+          } catch {
+          }
+          browserClient = null;
+        }
+      },
+    };
   };
 
   return start();
