@@ -370,6 +370,70 @@ async function fetchResponseText(id, mime) {
   return res.text();
 }
 
+function getHeaderValue(headers, headerName) {
+  if (!headers || typeof headers !== "object") return "";
+  const target = String(headerName || "").toLowerCase();
+  for (const [k, v] of Object.entries(headers)) {
+    if (String(k).toLowerCase() !== target) continue;
+    if (Array.isArray(v)) return String(v[0] || "");
+    return String(v || "");
+  }
+  return "";
+}
+
+function isLikelyTextRequestContentType(contentType) {
+  const ct = String(contentType || "").toLowerCase();
+  if (!ct) return true;
+  if (ct.startsWith("text/")) return true;
+  if (ct.includes("json")) return true;
+  if (ct.includes("xml")) return true;
+  if (ct.includes("javascript")) return true;
+  if (ct.includes("x-www-form-urlencoded")) return true;
+  if (ct.includes("graphql")) return true;
+  if (ct.includes("multipart/form-data")) return false;
+  if (ct.includes("octet-stream")) return false;
+  if (ct.startsWith("image/") || ct.startsWith("audio/") || ct.startsWith("video/")) return false;
+  return true;
+}
+
+async function buildRequestBodyBlock(detail, highlightQ = "") {
+  if (!detail?.request_body_path) {
+    return `
+      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
+      <pre>(empty)</pre>
+    `;
+  }
+
+  const contentType = getHeaderValue(detail.request_headers, "content-type");
+  if (!isLikelyTextRequestContentType(contentType)) {
+    return `
+      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
+      <pre>${highlightEscaped(`Binary request body is not rendered inline. Content-Type: ${contentType || "-"}`, highlightQ)}</pre>
+    `;
+  }
+
+  try {
+    const res = await fetch(`/api/requests/${encodeURIComponent(detail.id)}/body/request`);
+    if (!res.ok) {
+      return `
+        <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
+        <pre>(body file missing)</pre>
+      `;
+    }
+    const txt = await res.text();
+    const shortText = txt.slice(0, 600000);
+    return `
+      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
+      <pre>${highlightEscaped(shortText, highlightQ)}</pre>
+    `;
+  } catch {
+    return `
+      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
+      <pre>(failed to read request body)</pre>
+    `;
+  }
+}
+
 async function openBodyFolder(id, kind = "response") {
   const oldMeta = metaEl.textContent;
   try {
@@ -392,11 +456,19 @@ async function openBodyFolder(id, kind = "response") {
   }
 }
 
-function renderHeaders(detail, highlightQ = "") {
+function renderHeaders(detail, highlightQ = "", requestBodyBlock = "") {
   const reqHeaders = detail.request_headers || {};
   const resHeaders = detail.response_headers || {};
+  const reqHeaderList = Array.isArray(detail.request_headers_list) ? detail.request_headers_list : null;
+  const resHeaderList = Array.isArray(detail.response_headers_list) ? detail.response_headers_list : null;
 
-  function formatHeadersForDisplay(headers) {
+  function formatHeadersForDisplay(headers, headersList) {
+    if (Array.isArray(headersList) && headersList.length > 0) {
+      return headersList
+        .filter((x) => x && x.name)
+        .map((x) => `${String(x.name)}: ${String(x.value ?? "")}`)
+        .join("\n");
+    }
     const lines = [];
     for (const [k, v] of Object.entries(headers || {})) {
       if (Array.isArray(v)) {
@@ -417,9 +489,10 @@ function renderHeaders(detail, highlightQ = "") {
     <div class="kvline"><b>Remote Address:</b> ${esc(detail.response_remote_ip || "-")}:${esc(detail.response_remote_port || "-")}</div>
     <div class="kvline"><b>Type:</b> ${highlightEscaped(detail.response_mime_type || "-", highlightQ)}</div>
     <div class="kvline"><b>Request Headers</b></div>
-    <pre>${highlightEscaped(formatHeadersForDisplay(reqHeaders), highlightQ)}</pre>
+    <pre>${highlightEscaped(formatHeadersForDisplay(reqHeaders, reqHeaderList), highlightQ)}</pre>
+    ${requestBodyBlock}
     <div class="kvline" style="margin-top:8px;"><b>Response Headers</b></div>
-    <pre>${highlightEscaped(formatHeadersForDisplay(resHeaders), highlightQ)}</pre>
+    <pre>${highlightEscaped(formatHeadersForDisplay(resHeaders, resHeaderList), highlightQ)}</pre>
   `;
 }
 
@@ -465,7 +538,8 @@ async function renderDetail() {
   const mime = String(d.response_mime_type || "").toLowerCase();
 
   if (state.activeTab === "headers") {
-    detailEl.innerHTML = renderHeaders(d);
+    const requestBodyBlock = await buildRequestBodyBlock(d);
+    detailEl.innerHTML = renderHeaders(d, "", requestBodyBlock);
     return;
   }
 
@@ -555,7 +629,8 @@ async function renderSearchDetail() {
   const mime = String(d.response_mime_type || "").toLowerCase();
 
   if (searchState.activeTab === "headers") {
-    searchDetailEl.innerHTML = renderHeaders(d, searchState.q);
+    const requestBodyBlock = await buildRequestBodyBlock(d, searchState.q);
+    searchDetailEl.innerHTML = renderHeaders(d, searchState.q, requestBodyBlock);
     return;
   }
 
