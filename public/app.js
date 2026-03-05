@@ -396,41 +396,26 @@ function isLikelyTextRequestContentType(contentType) {
   return true;
 }
 
-async function buildRequestBodyBlock(detail, highlightQ = "") {
+async function buildRequestBodyContent(detail, highlightQ = "") {
   if (!detail?.request_body_path) {
-    return `
-      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
-      <pre>(empty)</pre>
-    `;
+    return `<pre>(empty)</pre>`;
   }
 
   const contentType = getHeaderValue(detail.request_headers, "content-type");
   if (!isLikelyTextRequestContentType(contentType)) {
-    return `
-      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
-      <pre>${highlightEscaped(`Binary request body is not rendered inline. Content-Type: ${contentType || "-"}`, highlightQ)}</pre>
-    `;
+    return `<pre>${highlightEscaped(`Binary request body is not rendered inline. Content-Type: ${contentType || "-"}`, highlightQ)}</pre>`;
   }
 
   try {
     const res = await fetch(`/api/requests/${encodeURIComponent(detail.id)}/body/request`);
     if (!res.ok) {
-      return `
-        <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
-        <pre>(body file missing)</pre>
-      `;
+      return `<pre>(body file missing)</pre>`;
     }
     const txt = await res.text();
     const shortText = txt.slice(0, 600000);
-    return `
-      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
-      <pre>${highlightEscaped(shortText, highlightQ)}</pre>
-    `;
+    return `<pre>${highlightEscaped(shortText, highlightQ)}</pre>`;
   } catch {
-    return `
-      <div class="kvline" style="margin-top:8px;"><b>Request Body</b></div>
-      <pre>(failed to read request body)</pre>
-    `;
+    return `<pre>(failed to read request body)</pre>`;
   }
 }
 
@@ -456,10 +441,13 @@ async function openBodyFolder(id, kind = "response") {
   }
 }
 
-function renderHeaders(detail, highlightQ = "", requestBodyBlock = "") {
+function renderHeaders(detail, highlightQ = "") {
   const reqHeaders = detail.request_headers || {};
   const resHeaders = detail.response_headers || {};
   const reqHeaderList = Array.isArray(detail.request_headers_list) ? detail.request_headers_list : null;
+  const reqHeaderExtraInfoList = Array.isArray(detail.request_headers_extra_info_list)
+    ? detail.request_headers_extra_info_list
+    : null;
   const resHeaderList = Array.isArray(detail.response_headers_list) ? detail.response_headers_list : null;
 
   function formatHeadersForDisplay(headers, headersList) {
@@ -482,16 +470,61 @@ function renderHeaders(detail, highlightQ = "", requestBodyBlock = "") {
     return lines.join("\n");
   }
 
+  function buildFinalRequestHeaderList() {
+    const finalList = headersToFlatPairs(reqHeaders, reqHeaderList);
+    if (!reqHeaderExtraInfoList || reqHeaderExtraInfoList.length === 0) {
+      return finalList;
+    }
+    const ordered = [];
+    const used = new Set();
+    for (let i = 0; i < reqHeaderExtraInfoList.length; i += 1) {
+      const h = reqHeaderExtraInfoList[i];
+      if (!h || !h.name) continue;
+      const lower = String(h.name).toLowerCase();
+      const idx = finalList.findIndex((x, j) => !used.has(j) && String(x.name).toLowerCase() === lower);
+      if (idx >= 0) {
+        ordered.push(finalList[idx]);
+        used.add(idx);
+      }
+    }
+    for (let i = 0; i < finalList.length; i += 1) {
+      if (!used.has(i)) ordered.push(finalList[i]);
+    }
+    return ordered;
+  }
+
+  function headersToFlatPairs(headers, headersList) {
+    if (Array.isArray(headersList) && headersList.length > 0) {
+      return headersList
+        .filter((x) => x && x.name)
+        .map((x) => ({ name: String(x.name), value: String(x.value ?? "") }));
+    }
+    const out = [];
+    for (const [k, v] of Object.entries(headers || {})) {
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          out.push({ name: String(k), value: String(item) });
+        }
+      } else {
+        out.push({ name: String(k), value: String(v) });
+      }
+    }
+    return out;
+  }
+
+  function formatPairsForDisplay(pairs) {
+    return (pairs || []).map((x) => `${x.name}: ${x.value}`).join("\n");
+  }
+
   return `
     <div class="kvline"><b>Request URL:</b> ${highlightEscaped(detail.request_url, highlightQ)}</div>
     <div class="kvline"><b>Request Method:</b> ${highlightEscaped(detail.request_method, highlightQ)}</div>
     <div class="kvline"><b>Status Code:</b> ${esc(detail.response_status ?? "-")} ${esc(detail.response_status_text || "")}</div>
     <div class="kvline"><b>Remote Address:</b> ${esc(detail.response_remote_ip || "-")}:${esc(detail.response_remote_port || "-")}</div>
     <div class="kvline"><b>Type:</b> ${highlightEscaped(detail.response_mime_type || "-", highlightQ)}</div>
-    <div class="kvline"><b>Request Headers</b></div>
-    <pre>${highlightEscaped(formatHeadersForDisplay(reqHeaders, reqHeaderList), highlightQ)}</pre>
-    ${requestBodyBlock}
-    <div class="kvline" style="margin-top:8px;"><b>Response Headers</b></div>
+    <div class="kvline"><b>Request Headers (Final)</b></div>
+    <pre>${highlightEscaped(formatPairsForDisplay(buildFinalRequestHeaderList()), highlightQ)}</pre>
+    <div class="kvline" style="margin-top:8px;"><b>Response Headers (Final)</b></div>
     <pre>${highlightEscaped(formatHeadersForDisplay(resHeaders, resHeaderList), highlightQ)}</pre>
   `;
 }
@@ -538,8 +571,12 @@ async function renderDetail() {
   const mime = String(d.response_mime_type || "").toLowerCase();
 
   if (state.activeTab === "headers") {
-    const requestBodyBlock = await buildRequestBodyBlock(d);
-    detailEl.innerHTML = renderHeaders(d, "", requestBodyBlock);
+    detailEl.innerHTML = renderHeaders(d);
+    return;
+  }
+
+  if (state.activeTab === "request-body") {
+    detailEl.innerHTML = await buildRequestBodyContent(d);
     return;
   }
 
@@ -629,8 +666,12 @@ async function renderSearchDetail() {
   const mime = String(d.response_mime_type || "").toLowerCase();
 
   if (searchState.activeTab === "headers") {
-    const requestBodyBlock = await buildRequestBodyBlock(d, searchState.q);
-    searchDetailEl.innerHTML = renderHeaders(d, searchState.q, requestBodyBlock);
+    searchDetailEl.innerHTML = renderHeaders(d, searchState.q);
+    return;
+  }
+
+  if (searchState.activeTab === "request-body") {
+    searchDetailEl.innerHTML = await buildRequestBodyContent(d, searchState.q);
     return;
   }
 

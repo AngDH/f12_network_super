@@ -228,6 +228,27 @@ function parseHeadersTextToPairs(headersText) {
   return out;
 }
 
+function ensureHeaderStages(meta) {
+  if (!meta.header_stages || typeof meta.header_stages !== "object") {
+    meta.header_stages = { request: [], response: [] };
+    return;
+  }
+  if (!Array.isArray(meta.header_stages.request)) meta.header_stages.request = [];
+  if (!Array.isArray(meta.header_stages.response)) meta.header_stages.response = [];
+}
+
+function pushHeaderStage(meta, channel, stage, headersInput) {
+  ensureHeaderStages(meta);
+  const key = channel === "response" ? "response" : "request";
+  const headersList = headersToPairs(headersInput);
+  if (headersList.length === 0) return;
+  meta.header_stages[key].push({
+    stage,
+    at: new Date().toISOString(),
+    headers_list: headersList,
+  });
+}
+
 function decodeDataUrl(url) {
   if (!String(url || "").startsWith("data:")) return null;
   const raw = String(url);
@@ -277,6 +298,7 @@ function buildBaseMeta({ id, params, requestBodyPath, targetInfo }) {
     request_method: params.request.method || "",
     request_headers: headerPairsToObject(requestHeaderPairs),
     request_headers_list: requestHeaderPairs,
+    request_headers_extra_info_list: [],
     request_body_path: requestBodyPath,
     request_timestamp: typeof params.timestamp === "number" ? params.timestamp : null,
     wall_time: typeof params.wallTime === "number" ? params.wallTime : null,
@@ -299,6 +321,10 @@ function buildBaseMeta({ id, params, requestBodyPath, targetInfo }) {
     body_capture_error: null,
     request_intercepted: false,
     response_intercepted: false,
+    header_stages: {
+      request: [],
+      response: [],
+    },
     failed: 0,
     error_text: null,
     created_at: new Date().toISOString(),
@@ -402,6 +428,7 @@ function captureToStore({
       base.request_headers_list = mergeHeaderPairs(base.request_headers_list, pendingHeaders);
       base.request_headers = headerPairsToObject(base.request_headers_list);
     }
+    pushHeaderStage(base, "request", "Fetch.requestPaused(Request)", base.request_headers_list);
     writeMeta(recordDir, base);
     reqState = {
       id,
@@ -476,10 +503,12 @@ function captureToStore({
             : null;
 
           const meta = buildBaseMeta({ id, params, requestBodyPath, targetInfo: t });
+          pushHeaderStage(meta, "request", "Network.requestWillBeSent", params.request.headers || {});
           const pendingHeaders = pendingRequestHeaders.get(key);
           if (pendingHeaders && typeof pendingHeaders === "object") {
             meta.request_headers_list = mergeHeaderPairs(meta.request_headers_list, pendingHeaders);
             meta.request_headers = headerPairsToObject(meta.request_headers_list);
+            pushHeaderStage(meta, "request", "Fetch.requestPaused(Request)", pendingHeaders);
           }
           if (pendingRequestIntercepted.get(key) === true) {
             meta.request_intercepted = true;
@@ -522,8 +551,12 @@ function captureToStore({
           if (!reqState) return;
           const metaPath = path.join(reqState.recordDir, "meta.json");
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+          ensureHeaderStages(meta);
+          const extraInfoList = headersToPairs(params.headers || {});
+          meta.request_headers_extra_info_list = extraInfoList;
           meta.request_headers_list = mergeHeaderPairs(meta.request_headers_list, params.headers || {});
           meta.request_headers = headerPairsToObject(meta.request_headers_list);
+          pushHeaderStage(meta, "request", "Network.requestWillBeSentExtraInfo", params.headers || {});
           writeMeta(reqState.recordDir, meta);
         } catch (err) {
           console.error("requestWillBeSentExtraInfo error:", err.message);
@@ -538,12 +571,14 @@ function captureToStore({
 
           const metaPath = path.join(reqState.recordDir, "meta.json");
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+          ensureHeaderStages(meta);
           const r = params.response || {};
 
           meta.response_status = typeof r.status === "number" ? Math.floor(r.status) : null;
           meta.response_status_text = r.statusText || null;
           meta.response_headers_list = mergeHeaderPairs(meta.response_headers_list, r.headers || {});
           meta.response_headers = headerPairsToObject(meta.response_headers_list);
+          pushHeaderStage(meta, "response", "Network.responseReceived", r.headers || {});
           meta.response_mime_type = r.mimeType || null;
           meta.response_protocol = r.protocol || null;
           meta.response_remote_ip = r.remoteIPAddress || null;
@@ -564,11 +599,14 @@ function captureToStore({
           if (!reqState) return;
           const metaPath = path.join(reqState.recordDir, "meta.json");
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+          ensureHeaderStages(meta);
           const fromText = parseHeadersTextToPairs(params.headersText);
           if (fromText.length > 0) {
             meta.response_headers_list = mergeHeaderPairs(meta.response_headers_list, fromText);
+            pushHeaderStage(meta, "response", "Network.responseReceivedExtraInfo(headersText)", fromText);
           } else {
             meta.response_headers_list = mergeHeaderPairs(meta.response_headers_list, params.headers || {});
+            pushHeaderStage(meta, "response", "Network.responseReceivedExtraInfo", params.headers || {});
           }
           meta.response_headers = headerPairsToObject(meta.response_headers_list);
           const setCookieFromText = extractSetCookieFromHeadersText(params.headersText);
@@ -633,8 +671,10 @@ function captureToStore({
                 try {
                   const metaPath = path.join(reqState.recordDir, "meta.json");
                   const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+                  ensureHeaderStages(meta);
                   meta.request_headers_list = mergeHeaderPairs(meta.request_headers_list, params.request.headers);
                   meta.request_headers = headerPairsToObject(meta.request_headers_list);
+                  pushHeaderStage(meta, "request", "Fetch.requestPaused(Request)", params.request.headers);
                   writeMeta(reqState.recordDir, meta);
                 } catch {
                 }
@@ -698,9 +738,11 @@ function captureToStore({
           const { reqState } = ensureReqStateForPaused(t, params);
           const metaPath = path.join(reqState.recordDir, "meta.json");
           const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+          ensureHeaderStages(meta);
           const pausedHeaders = headersArrayToObject(params.responseHeaders);
           meta.response_headers_list = mergeHeaderPairs(meta.response_headers_list, params.responseHeaders);
           meta.response_headers = headerPairsToObject(meta.response_headers_list);
+          pushHeaderStage(meta, "response", "Fetch.requestPaused(Response)", params.responseHeaders);
           const contentType =
             pausedHeaders["content-type"] ||
             pausedHeaders["Content-Type"] ||
