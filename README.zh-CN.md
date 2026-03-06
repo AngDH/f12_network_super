@@ -57,6 +57,24 @@ npm start
 - `CAPTURE_EXTRA_TARGET_TYPES` 默认空（可选：`worker,shared_worker,service_worker,webview`）
 - `DATA_DIR` 默认 `./data`
 
+### CAPTURE_EXTRA_TARGET_TYPES 使用方式
+
+默认情况下，Network Super 只自动附加更稳定的 target：`page,iframe`。
+
+如果你也要抓 worker 等类型，可在启动前设置环境变量：
+
+```powershell
+$env:CAPTURE_EXTRA_TARGET_TYPES="worker,shared_worker,service_worker,webview"
+npm start
+```
+
+只开启 `worker` 示例：
+
+```powershell
+$env:CAPTURE_EXTRA_TARGET_TYPES="worker"
+npm start
+```
+
 ## 拦截规则
 
 你可以编辑 `interceptor-rules.js` 来修改流量：

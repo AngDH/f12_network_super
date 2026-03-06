@@ -55,6 +55,24 @@ Open UI:
 - `CAPTURE_EXTRA_TARGET_TYPES` default empty (optional: `worker,shared_worker,service_worker,webview`)
 - `DATA_DIR` default `./data`
 
+### CAPTURE_EXTRA_TARGET_TYPES usage
+
+By default, Network Super only auto-attaches stable targets: `page,iframe`.
+
+If you also want worker-like targets, set env var before start:
+
+```powershell
+$env:CAPTURE_EXTRA_TARGET_TYPES="worker,shared_worker,service_worker,webview"
+npm start
+```
+
+Only enable `worker`:
+
+```powershell
+$env:CAPTURE_EXTRA_TARGET_TYPES="worker"
+npm start
+```
+
 ## Interception Hooks
 
 Edit `interceptor-rules.js` to modify traffic:
