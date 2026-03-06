@@ -3,14 +3,12 @@ const path = require("path");
 const CDP = require("chrome-remote-interface");
 const { getInterceptorHooks } = require("./interceptor");
 
-const CAPTURE_TARGET_TYPES = new Set([
-  "page",
-  "iframe",
-  "worker",
-  "shared_worker",
-  "service_worker",
-  "webview",
-]);
+const DEFAULT_CAPTURE_TARGET_TYPES = ["page", "iframe"];
+const EXTRA_CAPTURE_TARGET_TYPES = String(process.env.CAPTURE_EXTRA_TARGET_TYPES || "")
+  .split(",")
+  .map((x) => x.trim().toLowerCase())
+  .filter(Boolean);
+const CAPTURE_TARGET_TYPES = new Set([...DEFAULT_CAPTURE_TARGET_TYPES, ...EXTRA_CAPTURE_TARGET_TYPES]);
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -345,6 +343,8 @@ function captureToStore({
   const pendingRequestHeaders = new Map();
   const targetClients = new Map();
   const attachedTargets = new Map();
+  const attachInFlight = new Set();
+  const attachFailures = new Map();
   const hooks = getInterceptorHooks();
   let browserClient = null;
   let reconnectTimer = null;
@@ -444,6 +444,12 @@ function captureToStore({
     const t = normalizeTargetInfo(targetInfo);
     if (!t || !t.id) return;
     if (targetClients.has(t.id)) return;
+    if (attachInFlight.has(t.id)) return;
+
+    const failure = attachFailures.get(t.id);
+    if (failure && Date.now() < failure.nextRetryAt) return;
+
+    attachInFlight.add(t.id);
 
     try {
       const client = await CDP({
@@ -451,6 +457,7 @@ function captureToStore({
         port: cdpPort,
         target: t.id,
       });
+      attachFailures.delete(t.id);
       targetClients.set(t.id, client);
       attachedTargets.set(t.id, {
         id: t.id,
@@ -857,7 +864,24 @@ function captureToStore({
 
       console.log(`CDP attached target: ${t.id} ${t.title || ""}`);
     } catch (err) {
-      console.error(`Attach target failed (${t.id}):`, err.message);
+      const msg = err && err.message ? err.message : String(err);
+      const prev = attachFailures.get(t.id) || { count: 0, lastError: "" };
+      const count = prev.count + 1;
+      let waitMs = Math.min(1000 * Math.pow(2, Math.max(0, count - 1)), 30000);
+      if (/webSocketDebuggerUrl/i.test(msg)) {
+        // Some transient/non-inspectable targets do not expose websocket endpoint.
+        waitMs = 120000;
+      }
+      attachFailures.set(t.id, {
+        count,
+        lastError: msg,
+        nextRetryAt: Date.now() + waitMs,
+      });
+      if (prev.lastError !== msg || count <= 2) {
+        console.error(`Attach target failed (${t.id}):`, msg);
+      }
+    } finally {
+      attachInFlight.delete(t.id);
     }
   }
 
@@ -918,6 +942,21 @@ function captureToStore({
       await Promise.all((targetInfos || []).filter(isEligibleTarget).map((t) => attachTarget(t)));
 
       client.on("disconnect", () => {
+        for (const tc of targetClients.values()) {
+          try {
+            tc.close();
+          } catch {
+          }
+        }
+        targetClients.clear();
+        attachedTargets.clear();
+        attachInFlight.clear();
+        attachFailures.clear();
+        pendingRequestHeaders.clear();
+        pendingRequestIntercepted.clear();
+        requestMap.clear();
+        emitTargetsUpdate();
+
         browserClient = null;
         const msg = "browser connection disconnected";
         if (msg !== lastConnectErrorMessage) {

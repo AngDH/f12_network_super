@@ -1,6 +1,7 @@
 ﻿const rowsEl = document.getElementById("rows");
 const qEl = document.getElementById("q");
 const refreshBtn = document.getElementById("refreshBtn");
+const sendRequestBtn = document.getElementById("sendRequestBtn");
 const searchBtn = document.getElementById("searchBtn");
 const autoBtn = document.getElementById("autoBtn");
 const clearBtn = document.getElementById("clearBtn");
@@ -16,6 +17,8 @@ const searchRowsEl = document.getElementById("searchRows");
 const searchDetailEl = document.getElementById("searchDetail");
 const searchMetaEl = document.getElementById("searchMeta");
 const searchCloseBtn = document.getElementById("searchCloseBtn");
+const openInSendBtn = document.getElementById("openInSendBtn");
+const searchOpenInSendBtn = document.getElementById("searchOpenInSendBtn");
 
 let state = {
   q: "",
@@ -207,6 +210,7 @@ function renderList() {
           <td class="name-cell" title="${esc(x.request_url)}">${esc(pickNameForRow(x))}</td>
           <td>${esc(x.request_method || "")}</td>
           <td class="${cls}">${esc(status)}</td>
+          <td>${esc(x.response_protocol || "-")}</td>
           <td>${esc(x.response_mime_type || x.resource_type || "")}</td>
           <td>${esc(fmtSize(x.response_body_size))}</td>
           <td>${esc(fmtTime(x.sort_time || x.created_at))}</td>
@@ -248,6 +252,7 @@ function renderSearchList() {
           <td class="name-cell" title="${esc(x.request_url)}">${highlightEscaped(displayName, searchState.q)}</td>
           <td>${highlightEscaped(x.request_method || "", searchState.q)}</td>
           <td class="${cls}">${esc(status)}</td>
+          <td>${highlightEscaped(x.response_protocol || "-", searchState.q)}</td>
           <td>${highlightEscaped(x.response_mime_type || x.resource_type || "", searchState.q)}</td>
           <td>${esc(fmtSize(x.response_body_size))}</td>
           <td>${esc(fmtTime(x.sort_time || x.created_at))}</td>
@@ -417,6 +422,13 @@ async function buildRequestBodyContent(detail, highlightQ = "") {
   } catch {
     return `<pre>(failed to read request body)</pre>`;
   }
+}
+
+function openRequestInSendPage(id) {
+  if (!id) return;
+  const url = new URL("/send.html", location.origin);
+  url.searchParams.set("from", id);
+  window.open(url.toString(), "_blank", "noopener");
 }
 
 async function openBodyFolder(id, kind = "response") {
@@ -805,10 +817,10 @@ async function performSearch() {
   renderSearchList();
 }
 
-for (const tab of document.querySelectorAll(".tab")) {
+for (const tab of document.querySelectorAll(".tab:not(.search-tab)")) {
   tab.addEventListener("click", async () => {
     state.activeTab = tab.dataset.tab;
-    for (const t of document.querySelectorAll(".tab")) {
+    for (const t of document.querySelectorAll(".tab:not(.search-tab)")) {
       t.classList.toggle("active", t === tab);
     }
     await renderDetail();
@@ -839,6 +851,24 @@ refreshBtn.addEventListener("click", async () => {
   state.latestSortMs = 0;
   await loadListFull();
 });
+
+if (sendRequestBtn) {
+  sendRequestBtn.addEventListener("click", () => {
+    window.open("/send.html", "_blank", "noopener");
+  });
+}
+
+if (openInSendBtn) {
+  openInSendBtn.addEventListener("click", () => {
+    openRequestInSendPage(state.selectedId);
+  });
+}
+
+if (searchOpenInSendBtn) {
+  searchOpenInSendBtn.addEventListener("click", () => {
+    openRequestInSendPage(searchState.selectedId);
+  });
+}
 
 searchBtn.addEventListener("click", async () => {
   await performSearch();
