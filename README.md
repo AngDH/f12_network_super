@@ -52,6 +52,7 @@ Open UI:
 - `CDP_PORT` default `9222`
 - `CDP_TARGET` default empty (auto target attach)
 - `CAPTURE_DEVTOOLS` default `0` (set `1` to include `devtools://` tabs)
+- `CAPTURE_EXTRA_TARGET_TYPES` default empty (optional: `worker,shared_worker,service_worker,webview`)
 - `DATA_DIR` default `./data`
 
 ## Interception Hooks
@@ -69,5 +70,7 @@ npm start
 
 ## Notes
 
+- Stability: default auto-attach is limited to `page` and `iframe` targets to reduce crash/disconnect risks.
+- If you need extra target types, enable them with `CAPTURE_EXTRA_TARGET_TYPES`.
 - Some special requests may still have body capture limitations depending on browser behavior.
 - Existing records are file-based and are not backfilled when capture logic changes.

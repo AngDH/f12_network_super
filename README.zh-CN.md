@@ -9,7 +9,7 @@
 
 - 持久化抓包：元数据保存为 `meta.json`，请求体和响应体保存为文件
 - 多标签页监听：自动附加多个 Chrome 页面，可选择排除 `devtools://`
-- 多 target 监听：除页面外，也会附加 `worker/shared_worker/service_worker/webview`
+- 默认稳定监听：默认只附加 `page/iframe`，降低崩溃和断连风险
 - 全局搜索：支持 URL、请求头、响应头、请求体、响应体全文检索
 - 可视化查看：支持 Headers / Preview / Response / Meta 面板
 - 请求标记：支持右键颜色标记，并保存在浏览器本地
@@ -54,6 +54,7 @@ npm start
 - `CDP_PORT` 默认 `9222`
 - `CDP_TARGET` 默认空（自动附加 target）
 - `CAPTURE_DEVTOOLS` 默认 `0`（设置为 `1` 时包含 `devtools://` 标签页）
+- `CAPTURE_EXTRA_TARGET_TYPES` 默认空（可选：`worker,shared_worker,service_worker,webview`）
 - `DATA_DIR` 默认 `./data`
 
 ## 拦截规则
@@ -71,5 +72,7 @@ npm start
 
 ## 说明
 
+- 稳定性优化：默认只自动附加 `page/iframe`，避免不稳定 target 导致的反复 attach/断连。
+- 如需监听更多类型，可通过 `CAPTURE_EXTRA_TARGET_TYPES` 按需开启。
 - 某些特殊请求是否能抓到完整 body 仍受浏览器行为限制。
 - 抓包记录是文件化保存的，采集逻辑更新后不会自动补写旧记录。
