@@ -3,7 +3,7 @@
 [English](./README.md)
 
 `Network Super` 是一个基于 Chrome DevTools Protocol（CDP）实现的浏览器抓包与改包工具，定位类似 Fiddler 的浏览器侧网络调试器。
-它可以抓取 Chrome 标签页中的请求与响应，并将数据持久化保存到本地文件中，同时支持全文搜索与请求/响应拦截改写。
+它可以抓取 Chrome 标签页中的请求与响应，并将数据持久化保存到本地文件中，同时支持全文搜索、请求/响应拦截改写，以及 **Browser Send**（通过 CDP 控制浏览器发请求，而不是仅用 Node fetch）。
 
 ## 功能特性
 
@@ -14,6 +14,7 @@
 - 可视化查看：支持 Headers / Preview / Response / Meta 面板
 - 请求标记：支持右键颜色标记，并保存在浏览器本地
 - 拦截改写：通过 `interceptor-rules.js` 实现 `OnBeforeRequest` / `OnBeforeResponse`
+- Browser Send 与 Replay：可把抓包记录一键带入 Send 页面，编辑后通过已连接的 Chrome 标签页（CDP）发送
 - 文件化存储：便于直接查看、复制、归档和比对
 
 ## 运行要求

@@ -3,7 +3,7 @@
 [中文](./README.zh-CN.md)
 
 `Network Super` is a Fiddler-like browser network inspector built with Chrome DevTools Protocol (CDP).
-It captures requests and responses from Chrome tabs, persists them locally as files, supports full-text search across URL/headers/body, and provides interception hooks (`OnBeforeRequest` / `OnBeforeResponse`) for traffic rewriting.
+It captures requests and responses from Chrome tabs, persists them locally as files, supports full-text search across URL/headers/body, provides interception hooks (`OnBeforeRequest` / `OnBeforeResponse`) for traffic rewriting, and supports **Browser Send** (send requests through CDP-controlled Chrome instead of Node fetch).
 
 ## Features
 
@@ -12,6 +12,7 @@ It captures requests and responses from Chrome tabs, persists them locally as fi
 - Search everywhere: URL, request headers, response headers, request body, response body
 - Rich viewer: headers/preview/response/meta panels, file-folder shortcut, row marking
 - Traffic interception: mutate request and response through `interceptor-rules.js`
+- Browser Send and Replay: open a captured request in Send page, edit it, then send via connected Chrome tab (CDP)
 - File-based storage: easy to inspect, copy, archive, and diff
 
 ## Prerequisites
