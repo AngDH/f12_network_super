@@ -677,27 +677,10 @@ async function executeBrowserSend({
       });
       return { ok: false, id: persisted.id, error: persisted.meta.error_text };
     }
-    if (needsRequestHeaderRewrite && !headerRewriteApplied) {
-      const persisted = persistManualRecord({
-        title: "Browser Send",
-        sourceId: null,
-        method,
-        requestUrl: url,
-        requestHeaderPairs,
-        requestBodyBuf,
-        responseStatus: null,
-        responseStatusText: null,
-        responseHeaderPairs: [],
-        responseMime: null,
-        responseProtocol: null,
-        responseBodyBuf: null,
-        failed: 1,
-        errorText: "Request header override was not applied on browser request",
-        startedAt,
-        targetInfo,
-      });
-      return { ok: false, id: persisted.id, error: persisted.meta.error_text };
-    }
+    const headerOverrideWarning =
+      needsRequestHeaderRewrite && !headerRewriteApplied
+        ? "Request header override was not applied on browser request"
+        : null;
     const responseBodyBuf = Buffer.from(String(value.bodyBase64 || ""), "base64");
     const responseHeaderPairs = Array.isArray(value.headersList)
       ? value.headersList
@@ -728,6 +711,7 @@ async function executeBrowserSend({
       id: persisted.id,
       status: persisted.meta.response_status,
       elapsed_ms: Number(value.elapsedMs) || persisted.meta.replay_elapsed_ms,
+      warning: headerOverrideWarning,
     };
   } catch (err) {
     const persisted = persistManualRecord({

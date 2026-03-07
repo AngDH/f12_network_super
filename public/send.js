@@ -264,8 +264,13 @@ sendBtn.addEventListener("click", async () => {
     state.resultId = data.id;
     state.detail = await fetchDetail(data.id);
     state.responseText = null;
-    metaEl.textContent = `Browser send success: ${data.id} (status ${data.status}, ${data.elapsed_ms} ms)`;
-    metaEl.className = "meta status-ok";
+    if (data.warning) {
+      metaEl.textContent = `Browser send success: ${data.id} (status ${data.status}, ${data.elapsed_ms} ms). Warning: ${data.warning}`;
+      metaEl.className = "meta status-warn";
+    } else {
+      metaEl.textContent = `Browser send success: ${data.id} (status ${data.status}, ${data.elapsed_ms} ms)`;
+      metaEl.className = "meta status-ok";
+    }
     await renderDetail();
   } catch (err) {
     metaEl.textContent = err.message || "Browser Send failed";

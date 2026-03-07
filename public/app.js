@@ -179,6 +179,40 @@ function isBrowserSendRow(row) {
   return String(row?.resource_type || "").toLowerCase() === "browser send";
 }
 
+function dedupeBrowserSendShadowRows(items) {
+  const list = Array.isArray(items) ? items.slice() : [];
+  if (list.length <= 1) return list;
+
+  const bySig = new Map();
+  for (const row of list) {
+    if (!isBrowserSendRow(row)) continue;
+    const sig = `${String(row.request_method || "").toUpperCase()} ${String(row.request_url || "")}`;
+    if (!bySig.has(sig)) bySig.set(sig, []);
+    bySig.get(sig).push(getItemSortMs(row));
+  }
+  if (bySig.size === 0) return list;
+  for (const arr of bySig.values()) arr.sort((a, b) => a - b);
+
+  const keep = [];
+  for (const row of list) {
+    if (isBrowserSendRow(row)) {
+      keep.push(row);
+      continue;
+    }
+    const sig = `${String(row.request_method || "").toUpperCase()} ${String(row.request_url || "")}`;
+    const bsTimes = bySig.get(sig);
+    if (!bsTimes || bsTimes.length === 0) {
+      keep.push(row);
+      continue;
+    }
+    const t = getItemSortMs(row);
+    const hasNearBrowserSend = bsTimes.some((bt) => Math.abs(bt - t) <= 3000);
+    if (hasNearBrowserSend) continue;
+    keep.push(row);
+  }
+  return keep;
+}
+
 function renderTargets(items) {
   if (!items || items.length === 0) {
     targetsBarEl.innerHTML = "<b>Listening Tabs:</b> (none)";
@@ -314,7 +348,7 @@ async function loadListFull() {
   if (state.q) url.searchParams.set("q", state.q);
   const res = await fetch(url);
   const data = await res.json();
-  state.items = data.items || [];
+  state.items = dedupeBrowserSendShadowRows(data.items || []);
   rebuildLatestSortMs();
 
   if (state.selectedId && !state.items.find((x) => x.id === state.selectedId)) {
@@ -343,6 +377,7 @@ async function loadListIncremental() {
   if (append.length === 0) return;
 
   state.items = state.items.concat(append);
+  state.items = dedupeBrowserSendShadowRows(state.items);
   rebuildLatestSortMs();
   renderList();
 }
@@ -818,7 +853,7 @@ async function performSearch() {
 
   const res = await fetch(url);
   const data = await res.json();
-  searchState.items = data.items || [];
+  searchState.items = dedupeBrowserSendShadowRows(data.items || []);
   searchMetaEl.textContent = `Query: ${q} | Results: ${searchState.items.length}`;
   renderSearchList();
 }
