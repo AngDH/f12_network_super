@@ -277,6 +277,32 @@ function headerPairsToFetchHeadersObject(pairs) {
   return out;
 }
 
+function getHeaderFromPairs(pairs, name) {
+  const target = normalizeHeaderName(name);
+  const values = [];
+  for (const p of pairs || []) {
+    if (!p || !p.name) continue;
+    if (normalizeHeaderName(p.name) !== target) continue;
+    values.push(String(p.value ?? ""));
+  }
+  if (values.length === 0) return "";
+  if (target === "cookie") return values.join("; ");
+  return values[0];
+}
+
+function removeHeaderFromPairs(pairs, name) {
+  const target = normalizeHeaderName(name);
+  return (pairs || []).filter((p) => p && p.name && normalizeHeaderName(p.name) !== target);
+}
+
+function objectHeadersToPairs(headersObj) {
+  const out = [];
+  for (const [k, v] of Object.entries(headersObj || {})) {
+    out.push({ name: String(k), value: String(v ?? "") });
+  }
+  return out;
+}
+
 function normalizeReplayRequestPairs(meta, pairsMaybe) {
   if (Array.isArray(pairsMaybe) && pairsMaybe.length > 0) {
     return pairsMaybe
@@ -518,14 +544,58 @@ async function executeBrowserSend({
 
   const startedAt = Date.now();
   let client = null;
+  let fetchDomainEnabled = false;
   try {
     client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
-    const { Runtime } = client;
+    const { Runtime, Fetch } = client;
     await Runtime.enable();
+    const markerHeader = "x-network-super-send-id";
+    const markerValue = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const cookieOverride = getHeaderFromPairs(requestHeaderPairs, "cookie");
+    const requestPairsNoCookie = removeHeaderFromPairs(requestHeaderPairs, "cookie");
+
+    let cookieOverrideApplied = false;
+    if (cookieOverride) {
+      await Fetch.enable({
+        patterns: [{ urlPattern: "*", requestStage: "Request" }],
+      });
+      fetchDomainEnabled = true;
+      Fetch.requestPaused(async (params) => {
+        try {
+          const reqHeadersObj = params.request?.headers || {};
+          const markerSeen =
+            reqHeadersObj[markerHeader] ||
+            reqHeadersObj[markerHeader.toLowerCase()] ||
+            reqHeadersObj[markerHeader.toUpperCase()];
+          if (String(markerSeen || "") !== markerValue) {
+            await Fetch.continueRequest({ requestId: params.requestId });
+            return;
+          }
+
+          let pairs = objectHeadersToPairs(reqHeadersObj);
+          pairs = removeHeaderFromPairs(pairs, markerHeader);
+          pairs = removeHeaderFromPairs(pairs, "cookie");
+          pairs.push({ name: "Cookie", value: cookieOverride });
+          await Fetch.continueRequest({
+            requestId: params.requestId,
+            headers: pairs,
+          });
+          cookieOverrideApplied = true;
+        } catch {
+          try {
+            await Fetch.continueRequest({ requestId: params.requestId });
+          } catch {
+          }
+        }
+      });
+    }
+
     const payload = {
       method,
       url,
-      headers: requestHeaderPairs,
+      headers: cookieOverride
+        ? [...requestPairsNoCookie, { name: markerHeader, value: markerValue }]
+        : requestHeaderPairs,
       bodyText: requestBodyBuf ? requestBodyBuf.toString("utf8") : "",
       hasBody: Boolean(requestBodyBuf && requestBodyBuf.length > 0 && !["GET", "HEAD"].includes(method)),
       timeoutMs,
@@ -606,6 +676,27 @@ async function executeBrowserSend({
       });
       return { ok: false, id: persisted.id, error: persisted.meta.error_text };
     }
+    if (cookieOverride && !cookieOverrideApplied) {
+      const persisted = persistManualRecord({
+        title: "Browser Send",
+        sourceId: null,
+        method,
+        requestUrl: url,
+        requestHeaderPairs,
+        requestBodyBuf,
+        responseStatus: null,
+        responseStatusText: null,
+        responseHeaderPairs: [],
+        responseMime: null,
+        responseProtocol: null,
+        responseBodyBuf: null,
+        failed: 1,
+        errorText: "Cookie override was not applied on browser request",
+        startedAt,
+        targetInfo,
+      });
+      return { ok: false, id: persisted.id, error: persisted.meta.error_text };
+    }
     const responseBodyBuf = Buffer.from(String(value.bodyBase64 || ""), "base64");
     const responseHeaderPairs = Array.isArray(value.headersList)
       ? value.headersList
@@ -658,6 +749,12 @@ async function executeBrowserSend({
     });
     return { ok: false, id: persisted.id, error: persisted.meta.error_text };
   } finally {
+    if (fetchDomainEnabled && client?.Fetch) {
+      try {
+        await client.Fetch.disable();
+      } catch {
+      }
+    }
     if (client) {
       try {
         await client.close();

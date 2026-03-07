@@ -29,6 +29,7 @@
 ```powershell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
   --remote-debugging-port=9222 `
+  --disable-web-security `
   --user-data-dir="D:\tmp\chrome-cdp-profile"
 ```
 
