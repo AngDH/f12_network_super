@@ -277,19 +277,6 @@ function headerPairsToFetchHeadersObject(pairs) {
   return out;
 }
 
-function getHeaderFromPairs(pairs, name) {
-  const target = normalizeHeaderName(name);
-  const values = [];
-  for (const p of pairs || []) {
-    if (!p || !p.name) continue;
-    if (normalizeHeaderName(p.name) !== target) continue;
-    values.push(String(p.value ?? ""));
-  }
-  if (values.length === 0) return "";
-  if (target === "cookie") return values.join("; ");
-  return values[0];
-}
-
 function removeHeaderFromPairs(pairs, name) {
   const target = normalizeHeaderName(name);
   return (pairs || []).filter((p) => p && p.name && normalizeHeaderName(p.name) !== target);
@@ -551,11 +538,14 @@ async function executeBrowserSend({
     await Runtime.enable();
     const markerHeader = "x-network-super-send-id";
     const markerValue = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const cookieOverride = getHeaderFromPairs(requestHeaderPairs, "cookie");
-    const requestPairsNoCookie = removeHeaderFromPairs(requestHeaderPairs, "cookie");
-
-    let cookieOverrideApplied = false;
-    if (cookieOverride) {
+    const desiredOverridePairs = (requestHeaderPairs || [])
+      .filter((x) => x && x.name)
+      .map((x) => ({ name: String(x.name), value: String(x.value ?? "") }));
+    const rewritePairsForFetch = desiredOverridePairs.map((x) => ({ ...x }));
+    // The browser blocks some headers on fetch() input; we enforce final headers in Fetch.requestPaused.
+    const needsRequestHeaderRewrite = desiredOverridePairs.length > 0;
+    let headerRewriteApplied = false;
+    if (needsRequestHeaderRewrite) {
       await Fetch.enable({
         patterns: [{ urlPattern: "*", requestStage: "Request" }],
       });
@@ -574,13 +564,17 @@ async function executeBrowserSend({
 
           let pairs = objectHeadersToPairs(reqHeadersObj);
           pairs = removeHeaderFromPairs(pairs, markerHeader);
-          pairs = removeHeaderFromPairs(pairs, "cookie");
-          pairs.push({ name: "Cookie", value: cookieOverride });
+          for (const h of desiredOverridePairs) {
+            pairs = removeHeaderFromPairs(pairs, h.name);
+          }
+          for (const h of desiredOverridePairs) {
+            pairs.push({ name: h.name, value: h.value });
+          }
           await Fetch.continueRequest({
             requestId: params.requestId,
             headers: pairs,
           });
-          cookieOverrideApplied = true;
+          headerRewriteApplied = true;
         } catch {
           try {
             await Fetch.continueRequest({ requestId: params.requestId });
@@ -593,8 +587,8 @@ async function executeBrowserSend({
     const payload = {
       method,
       url,
-      headers: cookieOverride
-        ? [...requestPairsNoCookie, { name: markerHeader, value: markerValue }]
+      headers: needsRequestHeaderRewrite
+        ? [...rewritePairsForFetch, { name: markerHeader, value: markerValue }]
         : requestHeaderPairs,
       bodyText: requestBodyBuf ? requestBodyBuf.toString("utf8") : "",
       hasBody: Boolean(requestBodyBuf && requestBodyBuf.length > 0 && !["GET", "HEAD"].includes(method)),
@@ -676,7 +670,7 @@ async function executeBrowserSend({
       });
       return { ok: false, id: persisted.id, error: persisted.meta.error_text };
     }
-    if (cookieOverride && !cookieOverrideApplied) {
+    if (needsRequestHeaderRewrite && !headerRewriteApplied) {
       const persisted = persistManualRecord({
         title: "Browser Send",
         sourceId: null,
@@ -691,7 +685,7 @@ async function executeBrowserSend({
         responseProtocol: null,
         responseBodyBuf: null,
         failed: 1,
-        errorText: "Cookie override was not applied on browser request",
+        errorText: "Request header override was not applied on browser request",
         startedAt,
         targetInfo,
       });
