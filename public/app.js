@@ -123,6 +123,16 @@ function statusClass(status) {
   return "status-bad";
 }
 
+function rowStatusText(row) {
+  if (typeof row?.response_status === "number") return String(row.response_status);
+  if (row?.failed) {
+    const err = String(row?.error_text || "").trim();
+    if (err) return `(failed) ${err}`;
+    return "ERR";
+  }
+  return "-";
+}
+
 function visibleItems() {
   return state.items.filter((x) => {
     const filterOk = state.activeFilter === "all" || mimeToKind(x) === state.activeFilter;
@@ -235,7 +245,7 @@ function renderList() {
   rowsEl.innerHTML = list
     .map((x) => {
       const cls = statusClass(x.response_status);
-      const status = x.response_status ?? (x.failed ? "ERR" : "-");
+      const status = rowStatusText(x);
       const selected = state.selectedId === x.id ? "selected" : "";
       const mark = String(state.rowMarks[x.id] || "");
       const markClass = mark ? `mark-${mark}` : "";
@@ -248,7 +258,7 @@ function renderList() {
         <tr class="req-row ${selected} ${markClass} ${autoBrowserSend} ${autoIntercepted}" data-id="${esc(x.id)}">
           <td class="name-cell" title="${esc(x.request_url)}">${esc(pickNameForRow(x))}</td>
           <td>${esc(x.request_method || "")}</td>
-          <td class="${cls}">${esc(status)}</td>
+          <td class="${cls || (x.failed ? "status-bad" : "")}" title="${esc(String(x.error_text || ""))}">${esc(status)}</td>
           <td>${esc(x.response_protocol || "-")}</td>
           <td>${esc(x.response_mime_type || x.resource_type || "")}</td>
           <td>${esc(fmtSize(x.response_body_size))}</td>
@@ -277,7 +287,7 @@ function renderSearchList() {
   searchRowsEl.innerHTML = searchState.items
     .map((x) => {
       const cls = statusClass(x.response_status);
-      const status = x.response_status ?? (x.failed ? "ERR" : "-");
+      const status = rowStatusText(x);
       const selected = searchState.selectedId === x.id ? "selected" : "";
       const mark = String(state.rowMarks[x.id] || "");
       const markClass = mark ? `mark-${mark}` : "";
@@ -291,7 +301,7 @@ function renderSearchList() {
         <tr class="req-row ${selected} ${markClass} ${autoBrowserSend} ${autoIntercepted}" data-search-id="${esc(x.id)}">
           <td class="name-cell" title="${esc(x.request_url)}">${highlightEscaped(displayName, searchState.q)}</td>
           <td>${highlightEscaped(x.request_method || "", searchState.q)}</td>
-          <td class="${cls}">${esc(status)}</td>
+          <td class="${cls || (x.failed ? "status-bad" : "")}" title="${esc(String(x.error_text || ""))}">${highlightEscaped(status, searchState.q)}</td>
           <td>${highlightEscaped(x.response_protocol || "-", searchState.q)}</td>
           <td>${highlightEscaped(x.response_mime_type || x.resource_type || "", searchState.q)}</td>
           <td>${esc(fmtSize(x.response_body_size))}</td>
