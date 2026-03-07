@@ -290,6 +290,14 @@ function objectHeadersToPairs(headersObj) {
   return out;
 }
 
+function normalizeUrlForMatch(url) {
+  try {
+    return new URL(String(url || "")).toString();
+  } catch {
+    return String(url || "");
+  }
+}
+
 function normalizeReplayRequestPairs(meta, pairsMaybe) {
   if (Array.isArray(pairsMaybe) && pairsMaybe.length > 0) {
     return pairsMaybe
@@ -536,15 +544,14 @@ async function executeBrowserSend({
     client = await CDP({ host: CDP_HOST, port: CDP_PORT, target: targetId });
     const { Runtime, Fetch } = client;
     await Runtime.enable();
-    const markerHeader = "x-network-super-send-id";
-    const markerValue = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const desiredOverridePairs = (requestHeaderPairs || [])
       .filter((x) => x && x.name)
       .map((x) => ({ name: String(x.name), value: String(x.value ?? "") }));
-    const rewritePairsForFetch = desiredOverridePairs.map((x) => ({ ...x }));
     // The browser blocks some headers on fetch() input; we enforce final headers in Fetch.requestPaused.
     const needsRequestHeaderRewrite = desiredOverridePairs.length > 0;
     let headerRewriteApplied = false;
+    const expectMethod = String(method || "").toUpperCase();
+    const expectUrl = normalizeUrlForMatch(url);
     if (needsRequestHeaderRewrite) {
       await Fetch.enable({
         patterns: [{ urlPattern: "*", requestStage: "Request" }],
@@ -552,18 +559,20 @@ async function executeBrowserSend({
       fetchDomainEnabled = true;
       Fetch.requestPaused(async (params) => {
         try {
-          const reqHeadersObj = params.request?.headers || {};
-          const markerSeen =
-            reqHeadersObj[markerHeader] ||
-            reqHeadersObj[markerHeader.toLowerCase()] ||
-            reqHeadersObj[markerHeader.toUpperCase()];
-          if (String(markerSeen || "") !== markerValue) {
+          const pausedMethod = String(params.request?.method || "").toUpperCase();
+          const pausedUrl = normalizeUrlForMatch(params.request?.url || "");
+          if (pausedMethod === "OPTIONS") {
+            await Fetch.continueRequest({ requestId: params.requestId });
+            return;
+          }
+          if (headerRewriteApplied || pausedMethod !== expectMethod || pausedUrl !== expectUrl) {
             await Fetch.continueRequest({ requestId: params.requestId });
             return;
           }
 
+          const reqHeadersObj = params.request?.headers || {};
+
           let pairs = objectHeadersToPairs(reqHeadersObj);
-          pairs = removeHeaderFromPairs(pairs, markerHeader);
           for (const h of desiredOverridePairs) {
             pairs = removeHeaderFromPairs(pairs, h.name);
           }
@@ -587,9 +596,7 @@ async function executeBrowserSend({
     const payload = {
       method,
       url,
-      headers: needsRequestHeaderRewrite
-        ? [...rewritePairsForFetch, { name: markerHeader, value: markerValue }]
-        : requestHeaderPairs,
+      headers: requestHeaderPairs,
       bodyText: requestBodyBuf ? requestBodyBuf.toString("utf8") : "",
       hasBody: Boolean(requestBodyBuf && requestBodyBuf.length > 0 && !["GET", "HEAD"].includes(method)),
       timeoutMs,

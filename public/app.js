@@ -175,6 +175,10 @@ function shortUrl(url) {
   }
 }
 
+function isBrowserSendRow(row) {
+  return String(row?.resource_type || "").toLowerCase() === "browser send";
+}
+
 function renderTargets(items) {
   if (!items || items.length === 0) {
     targetsBarEl.innerHTML = "<b>Listening Tabs:</b> (none)";
@@ -201,12 +205,13 @@ function renderList() {
       const selected = state.selectedId === x.id ? "selected" : "";
       const mark = String(state.rowMarks[x.id] || "");
       const markClass = mark ? `mark-${mark}` : "";
+      const autoBrowserSend = !mark && isBrowserSendRow(x) ? "auto-browser-send" : "";
       const autoIntercepted =
-        !mark && (x.request_intercepted === true || x.response_intercepted === true)
+        !mark && !autoBrowserSend && (x.request_intercepted === true || x.response_intercepted === true)
           ? "auto-intercepted"
           : "";
       return `
-        <tr class="req-row ${selected} ${markClass} ${autoIntercepted}" data-id="${esc(x.id)}">
+        <tr class="req-row ${selected} ${markClass} ${autoBrowserSend} ${autoIntercepted}" data-id="${esc(x.id)}">
           <td class="name-cell" title="${esc(x.request_url)}">${esc(pickNameForRow(x))}</td>
           <td>${esc(x.request_method || "")}</td>
           <td class="${cls}">${esc(status)}</td>
@@ -242,13 +247,14 @@ function renderSearchList() {
       const selected = searchState.selectedId === x.id ? "selected" : "";
       const mark = String(state.rowMarks[x.id] || "");
       const markClass = mark ? `mark-${mark}` : "";
+      const autoBrowserSend = !mark && isBrowserSendRow(x) ? "auto-browser-send" : "";
       const autoIntercepted =
-        !mark && (x.request_intercepted === true || x.response_intercepted === true)
+        !mark && !autoBrowserSend && (x.request_intercepted === true || x.response_intercepted === true)
           ? "auto-intercepted"
           : "";
       const displayName = pickNameForRow(x);
       return `
-        <tr class="req-row ${selected} ${markClass} ${autoIntercepted}" data-search-id="${esc(x.id)}">
+        <tr class="req-row ${selected} ${markClass} ${autoBrowserSend} ${autoIntercepted}" data-search-id="${esc(x.id)}">
           <td class="name-cell" title="${esc(x.request_url)}">${highlightEscaped(displayName, searchState.q)}</td>
           <td>${highlightEscaped(x.request_method || "", searchState.q)}</td>
           <td class="${cls}">${esc(status)}</td>
