@@ -330,6 +330,16 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
+      details > summary {
+        cursor: pointer;
+        user-select: none;
+      }
+      details > summary::-webkit-details-marker {
+        color: var(--muted);
+      }
+      details > pre {
+        margin-top: 6px;
+      }
       .muted {
         color: var(--muted);
       }

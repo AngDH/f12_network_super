@@ -579,16 +579,23 @@ function renderHeaders(detail, highlightQ = "") {
     return (pairs || []).map((x) => `${x.name}: ${x.value}`).join("\n");
   }
 
+  const requestHeadersText = formatPairsForDisplay(buildFinalRequestHeaderList());
+  const responseHeadersText = formatHeadersForDisplay(resHeaders, resHeaderList);
+
   return `
     <div class="kvline"><b>Request URL:</b> ${highlightEscaped(detail.request_url, highlightQ)}</div>
     <div class="kvline"><b>Request Method:</b> ${highlightEscaped(detail.request_method, highlightQ)}</div>
     <div class="kvline"><b>Status Code:</b> ${esc(detail.response_status ?? "-")} ${esc(detail.response_status_text || "")}</div>
     <div class="kvline"><b>Remote Address:</b> ${esc(detail.response_remote_ip || "-")}:${esc(detail.response_remote_port || "-")}</div>
     <div class="kvline"><b>Type:</b> ${highlightEscaped(detail.response_mime_type || "-", highlightQ)}</div>
-    <div class="kvline"><b>Request Headers (Final)</b></div>
-    <pre>${highlightEscaped(formatPairsForDisplay(buildFinalRequestHeaderList()), highlightQ)}</pre>
-    <div class="kvline" style="margin-top:8px;"><b>Response Headers (Final)</b></div>
-    <pre>${highlightEscaped(formatHeadersForDisplay(resHeaders, resHeaderList), highlightQ)}</pre>
+    <details open>
+      <summary class="kvline"><b>Request Headers (Final)</b></summary>
+      <pre>${highlightEscaped(requestHeadersText, highlightQ)}</pre>
+    </details>
+    <details open style="margin-top:8px;">
+      <summary class="kvline"><b>Response Headers (Final)</b></summary>
+      <pre>${highlightEscaped(responseHeadersText, highlightQ)}</pre>
+    </details>
   `;
 }
 
